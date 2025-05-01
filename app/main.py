@@ -38,7 +38,7 @@ def main():
     )
 
     # Access the 'preprocessor_config.json' file within 'app.hf' package
-    model_path = files("app") / "hf" / "yolov10b.onnx"
+    model_path = files("app") / "hf" / "best.pt"
     model_path = Path(str(model_path))
 
     model = yolov5.load(model_path=str(model_path), device="cpu")
