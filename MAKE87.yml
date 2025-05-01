@@ -1,0 +1,55 @@
+build_kit:
+  name: python3
+  version: latest
+inbound_topics:
+  - name: IMAGE_DATA
+    message_type: make87_messages.image.compressed.image_jpeg.ImageJPEG
+outbound_topics:
+  - name: DETECTIONS
+    message_type: make87_messages.detection.box.boxes_2d_aligned.Boxes2DAxisAligned
+provider_endpoints:
+  - name: DETECTIONS
+    requester_message_type: make87_messages.image.compressed.image_jpeg.ImageJPEG
+    provider_message_type: make87_messages.detection.box.boxes_2d_aligned.Boxes2DAxisAligned
+  - name: MODEL_ONTOLOGY
+    requester_message_type: make87_messages.core.Empty
+    provider_message_type: make87_messages.detection.ontology.ModelOntology
+config:
+  values:
+    - name: CONFIDENCE_THRESHOLD
+      description: "The minimum confidence threshold for a detection to be considered valid. Predictions below this will be filtered out. Default: 0.25"
+      default_value: "0.25"
+      required: false
+      secret: false
+    - name: IOU_THRESHOLD
+      description: "The IoU threshold used during Non-Maximum Suppression to filter overlapping boxes. Default: 0.45"
+      default_value: "0.45"
+      required: false
+      secret: false
+    - name: CLASS_AGNOSTIC_NMS
+      description: "Whether to perform Non-Maximum Suppression without considering class labels. If true, boxes are suppressed regardless of class. Default: false"
+      default_value: "false"
+      required: false
+      secret: false
+    - name: MULTI_LABEL
+      description: "Whether a single bounding box can be assigned multiple class labels if they exceed the confidence threshold. Default: false"
+      default_value: "false"
+      required: false
+      secret: false
+    - name: MAX_DETECTIONS
+      description: "The maximum number of detection boxes allowed per image. Default: 1000"
+      default_value: "1000"
+      required: false
+      secret: false
+    - name: IMAGE_SIZE
+      description: "The image size to which the input will be resized before inference. Must be a multiple of 32. Default: 640"
+      default_value: "640"
+      required: false
+      secret: false
+    - name: TEST_TIME_AUGMENTATION
+      description: "Whether to enable test-time augmentation (e.g., flipping, scaling) to improve detection accuracy. If set to `true`, will disable regular resize inference. Default: false"
+      default_value: "false"
+      required: false
+      secret: false
+
+
