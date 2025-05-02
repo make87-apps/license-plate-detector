@@ -46,7 +46,7 @@ def main():
         name="DETECTIONS", requester_message_type=ImageJPEG, provider_message_type=Boxes2DAxisAligned
     )
 
-    model_path = files("app") / "hf" / "best.onnx"
+    model_path = files("app") / "hf" / "model.onnx"
     net = cv2.dnn.readNetFromONNX(str(model_path))
 
     model_config = files("app") / "hf" / "config.json"
