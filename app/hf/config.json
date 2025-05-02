@@ -1,1 +1,9 @@
-{"input_size": 640, "task": "object-detection", "best_ap50": 0.9783431294995892}
+{
+  "id2label": {
+    "0": "license_plate"
+  },
+  "label2id": {
+    "license_plate": 0
+  },
+  "model_type": "yolov5n"
+}
