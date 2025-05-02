@@ -12,6 +12,7 @@ dependencies = [
     "make87",
     "make87_messages",
     "opencv-python-headless>=4.10.0,<5.0.0",
+    "onnxruntime>=1.21.1,<2.0.0",
     "numpy",
 ]
 description = "A small example package"
