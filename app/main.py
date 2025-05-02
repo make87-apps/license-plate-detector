@@ -1,10 +1,11 @@
-from importlib.resources import files
-from pathlib import Path
+import json
 
 import cv2
-import make87
 import numpy as np
-import yolov5
+from pathlib import Path
+from importlib.resources import files
+import make87
+
 from make87_messages.core.empty_pb2 import Empty
 from make87_messages.core.header_pb2 import Header
 from make87_messages.detection.box.box_2d_pb2 import Box2DAxisAligned
@@ -14,41 +15,46 @@ from make87_messages.geometry.box.box_2d_aligned_pb2 import Box2DAxisAligned as 
 from make87_messages.image.compressed.image_jpeg_pb2 import ImageJPEG
 
 
+def nms(boxes, scores, iou_threshold):
+    idxs = cv2.dnn.NMSBoxes(bboxes=boxes, scores=scores, score_threshold=0.0, nms_threshold=iou_threshold)
+
+    if len(idxs) == 0:
+        return []
+
+    # Handle both [[0], [1]] and [0, 1]
+    if isinstance(idxs, np.ndarray):
+        return idxs.flatten().tolist()
+    else:
+        return [int(i[0]) if isinstance(i, (list, tuple)) else int(i) for i in idxs]
+
+
+def xywh2xyxy(x, y, w, h):
+    return x - w / 2, y - h / 2, x + w / 2, y + h / 2
+
+
 def main():
     make87.initialize()
     conf_threshold = make87.get_config_value("CONFIDENCE_THRESHOLD", 0.25, float)
     iou_threshold = make87.get_config_value("IOU_THRESHOLD", 0.45, float)
-    class_agnostic = make87.get_config_value(
-        "CLASS_AGNOSTIC_NMS", False, lambda s: {"true": True, "false": False}[s.strip().lower()]
-    )
-    multi_label = make87.get_config_value("MULTI_LABEL", False, bool)
     max_detections = make87.get_config_value("MAX_DETECTIONS", 1000, int)
     image_size = make87.get_config_value("IMAGE_SIZE", 640, int)
-    test_time_augmentation = make87.get_config_value(
-        "TEST_TIME_AUGMENTATION", False, lambda s: {"true": True, "false": False}[s.strip().lower()]
-    )
 
-    ontology_endpoint = make87.get_provider(
-        name="MODEL_ONTOLOGY", requester_message_type=Empty, provider_message_type=ModelOntology
-    )
+    ontology_endpoint = make87.get_provider("MODEL_ONTOLOGY", Empty, ModelOntology)
     jpeg_subscriber = make87.get_subscriber(name="IMAGE_DATA", message_type=ImageJPEG)
     detections_publisher = make87.get_publisher(name="DETECTIONS", message_type=Boxes2DAxisAligned)
     detections_endpoint = make87.get_provider(
         name="DETECTIONS", requester_message_type=ImageJPEG, provider_message_type=Boxes2DAxisAligned
     )
 
-    # Access the 'preprocessor_config.json' file within 'app.hf' package
-    model_path = files("app") / "hf" / "best.pt"
-    model_path = Path(str(model_path))
+    model_path = files("app") / "hf" / "best.onnx"
+    net = cv2.dnn.readNetFromONNX(str(model_path))
 
-    model = yolov5.load(model_path=str(model_path), device="cpu")
-    model.conf = conf_threshold
-    model.iou = iou_threshold
-    model.agnostic = class_agnostic
-    model.multi_label = multi_label
-    model.max_det = max_detections
+    model_config = files("app") / "hf" / "config.json"
+    model_config = Path(str(model_config))
 
-    # Setup ontology provider
+    with open(model_config) as f:
+        config = json.load(f)
+
     def ontology_callback(message: Empty) -> ModelOntology:
         header = Header()
         header.timestamp.GetCurrentTime()
@@ -57,43 +63,60 @@ def main():
                 id=int(class_id),
                 label=class_label,
             )
-            for class_id, class_label in model.names.items()
+            for class_id, class_label in config["id2label"].items()
         ]
         return ModelOntology(header=header, classes=class_entries)
 
     ontology_endpoint.provide(ontology_callback)
 
-    # Setup pub/sub + provider
     def detections_callback(message: ImageJPEG) -> Boxes2DAxisAligned:
-        # Convert message data to an image
         jpeg_array = np.frombuffer(message.data, dtype=np.uint8)
-        image = cv2.imdecode(jpeg_array, cv2.IMREAD_UNCHANGED)
+        image = cv2.imdecode(jpeg_array, cv2.IMREAD_COLOR)
 
-        # Run detection on the image
-        detections = model(image, size=image_size, augment=test_time_augmentation)
-
-        header = make87.header_from_message(
-            Header,
-            message=message,
-            append_entity_path="license_plates",
+        blob = cv2.dnn.blobFromImage(
+            image, scalefactor=1 / 255.0, size=(image_size, image_size), mean=(0, 0, 0), swapRB=True, crop=False
         )
+        net.setInput(blob)
+        output = net.forward()[0]  # shape: [num_preds, 85]
 
-        # Create the detection message
+        detections = []
+        for row in output:
+            obj_conf = row[4]
+            class_scores = row[5:]
+            class_id = int(np.argmax(class_scores))
+            class_conf = class_scores[class_id]
+            confidence = obj_conf * class_conf
+
+            if confidence > conf_threshold:
+                x, y, w, h = row[:4]
+                x1, y1, x2, y2 = xywh2xyxy(x, y, w, h)
+                detections.append((x1, y1, x2, y2, confidence, class_id))
+
+        if not detections:
+            return Boxes2DAxisAligned(header=Header())
+
+        # Prepare for NMS
+        boxes = [[int(x1), int(y1), int(x2 - x1), int(y2 - y1)] for x1, y1, x2, y2, _, _ in detections]
+        scores = [float(score) for *_, score, _ in detections]
+        keep_idxs = nms(boxes, scores, iou_threshold)
+
+        header = make87.header_from_message(Header, message=message, append_entity_path="license_plates")
+
         boxes2d = Boxes2DAxisAligned(
             header=header,
             boxes=[
                 Box2DAxisAligned(
                     geometry=Box2DAxisAlignedGeometry(
                         header=header,
-                        x=x1,
-                        y=y1,
-                        width=x2 - x1,
-                        height=y2 - y1,
+                        x=float(detections[i][0]),
+                        y=float(detections[i][1]),
+                        width=float(detections[i][2] - detections[i][0]),
+                        height=float(detections[i][3] - detections[i][1]),
                     ),
-                    confidence=confidence,
-                    class_id=class_id,
+                    confidence=float(detections[i][4]),
+                    class_id=int(detections[i][5]),
                 )
-                for x1, y1, x2, y2, confidence, class_id in detections.pred[0].cpu().numpy()
+                for i in keep_idxs[:max_detections]
             ],
         )
         return boxes2d

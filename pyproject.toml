@@ -11,14 +11,12 @@ authors = [
 dependencies = [
     "make87",
     "make87_messages",
-    "yolov5",
     "opencv-python-headless>=4.10.0,<5.0.0",
     "numpy",
 ]
 description = "A small example package"
 readme = "README.md"
 requires-python = ">=3.9,<3.13"
-
 
 [tool.setuptools.packages.find]
 where = ["."]
